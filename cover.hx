@@ -1,11 +1,37 @@
 // --- Saved variables ---
 // You can add what you want to the save
 savedInt 		= 0; // Here is the initialization for the first launch, after that the value will depend on what has been saved
-
+var prevDiscoveredZones:Array<Int> = [];
+var towerZones:Array<Int> = [];
+var prevTowerZones:Array<Int> = [];
+var scoutZones:Array<Int> = [];
+var scoutZonesTime:Array<Float> = [];
+var prevUnitZones:Array<Int> = [];
+var valkyrieZones:Array<Int> = [];
+var specterZones:Array<Int> = [];
+var valkyries:Array<Unit> = [];
+var specters:Array<Unit> = [];
 
 function saveState() {
+	valkyrieZones = [];
+	for (v in valkyries) {
+		valkyrieZones.push(v.zone.id);
+	}
+	for (s in specters) {
+		if (specterZones.indexOf(s.zone.id) == -1) {
+			specterZones.push(s.zone.id);
+		}
+	}
 	state.scriptProps = {
 		savedInt 		: savedInt,
+		prevDiscoveredZones: prevDiscoveredZones,
+		towerZones: towerZones,
+		prevTowerZones: prevTowerZones,
+		scoutZones: scoutZones,
+		scoutZonesTime: scoutZonesTime,
+		prevUnitZones: prevUnitZones,
+		valkyrieZones: valkyrieZones,
+		specterZones: specterZones
 	};
 }
 
@@ -13,11 +39,11 @@ function saveState() {
 // --- Local variables ---
 var drakkarSent = false;
 var drakkarSpawnZone = 137;
-var prevDiscoveredZones:Array<Int> = [];
-var towerZones:Array<Int> = [];
-var prevTowerZones:Array<Int> = [];
-var scoutZones:Array<Int> = [];
-var scoutZonesTime:Array<Float> = [];
+var scoutDiscoverTimeout = 40; //time, after which zone will be hidden
+var prevUnits:Array<Unit> = [];
+var newbornSpecters:Array<Unit> = [];
+var specterSpawnTime:Array<Float> = [];
+var thorZones = [102,82,77];
 var zones = [122, 107, 112, 127, 136, 121, 93, 64, 100, 86, 72, 57, 111, 91, 79, 69, 49, 128, 113, 101, 87, 76, 61, 134, 124, 110, 97, 82, 63,
 54, 130, 117, 102, 88, 75, 59, 106, 94, 77, 85];
                                      //122              107                   112                     127         136        121
@@ -60,11 +86,27 @@ function onFirstLaunch() {
 	player.addResource(Resource.Food, 100);
 
 	spawnInitialUnits();
-	savedInt = 1;
+
+	//valkyrieZones = thorZones.copy();
 }
 
 function onEachLaunch() {
-	trace(drakkarSpawnZone);
+	//load valkyries
+	/*for (zone in valkyrieZones) {
+		for (unit in getZone(zone).units) {
+			if (unit.kind == Unit.Valkyrie) {
+				valkyries.push(unit);
+			}
+		}
+	}
+	for (zone in specterZones) {
+		for (unit in getZone(zone).units) {
+			if (unit.kind == Unit.SpecterWarrior) {
+				specters.push(unit);
+			}
+		}
+	}*/
+
 }
 
 function spawnInitialUnits() {
@@ -145,7 +187,7 @@ function updateFog() {
 	var tmpScoutZones:Array<Int> = [];
 	var tmpScoutZonesTime:Array<Float> = [];
 	for (i in 0...scoutZones.length) {
-		if (scoutZonesTime[i] + 10 <= state.time &&
+		if (scoutZonesTime[i] + scoutDiscoverTimeout <= state.time &&
 		towerZones.indexOf(scoutZones[i]) == -1 &&
 		player.zones.indexOf(getZone(scoutZones[i])) == -1 &&
 		!playerHasUnitsInZone(getZone(scoutZones[i]))) {
@@ -180,9 +222,75 @@ function updateFog() {
 	}
 }
 
+function updateSpecters() {
+	if (getActiveValkyrie() == null) { return; }
+
+	var rmNewbornSpecters:Array<Unit> = [];
+	var rmSpecterSpawnTime:Array<Float> = [];
+	var n = 0;
+	for (t in specterSpawnTime) {
+		if (t + 3 < state.time) { //spawned specters will stay in zone for 3s, then move to its mistress
+			specters.push(newbornSpecters[n]);
+			rmNewbornSpecters.push(newbornSpecters[n]);
+			rmSpecterSpawnTime.push(specterSpawnTime[n]);
+			n++;
+		}
+		else break;
+	}
+	for (specter in rmNewbornSpecters) { newbornSpecters.remove(specter); }
+	for (stime in rmSpecterSpawnTime) { specterSpawnTime.remove(stime); }
+	if (prevUnits.length > player.units.length) {
+		for (i in 0...prevUnits.length) {
+			if (prevUnits[i].zone == null) { //found dead unit, spawn specter
+				var specter = getZone(prevUnitZones[i]).addUnit(Unit.SpecterWarrior)[0];
+				specter.x = prevUnits[i].x;
+				specter.y = prevUnits[i].y;
+				newbornSpecters.push(specter);
+				specterSpawnTime.push(state.time);
+			}
+		}
+	}
+}
+
+function getActiveValkyrie() {
+	for (v in valkyries) {
+		if (v.zone != null) { return v; }
+	}
+	return null;
+}
+
+function getValkyrieThorZone(valkyrie:Unit) {
+	var i = valkyries.indexOf(valkyrie);
+	if (i == -1) { i = 0; }
+	return getZone(thorZones[i]);
+}
+
+function updateValkyries() {
+	//remove dead specters from array
+	specters = specters.filter(function (unit) {return unit.zone != null; } );
+	//valkyrie AI
+	var valkyrie = getActiveValkyrie();
+	if (valkyrie == null) {
+		var waitSpecters = false;
+		for (s in specters) {
+			if (s.zone != valkyrie.zone) {
+				s.moveToZone(valkyrie.zone, false);
+				waitSpecters = true;
+			}
+		}
+		if (waitSpecters) { return; }
+		var armySize = player.getMilitaryCount();
+		if (armySize <= 3) {
+			valkyrie.moveToZone(getValkyrieThorZone(valkyrie), false);
+		}
+	}
+}
+
 // Regular update is called every 0.5s
 function regularUpdate(dt : Float) {
 	updateFog();
+	updateValkyries();
+	updateSpecters();
 
 	var sheepsNum = 0;
 	for (unit in player.zones[0].units) {
@@ -192,5 +300,10 @@ function regularUpdate(dt : Float) {
 	if (state.time > 5 && !drakkarSent) {
 		drakkarSent = true;
 		//drakkar(player, player.zones[0], getZone(drakkarSpawnZone), 0, 0, generateDrakkarUnits());
+	}
+	prevUnits = player.units.copy();
+	prevUnitZones = [];
+	for (i in 0...player.units.length) {
+		prevUnitZones[i] = player.units[i].zone.id;
 	}
 }
