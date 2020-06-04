@@ -15,7 +15,7 @@ var specters:Array<Unit> = [];
 function saveState() {
 	valkyrieZones = [];
 	for (v in valkyries) {
-		valkyrieZones.push(v.zone.id);
+		if (v.zone != null) { valkyrieZones.push(v.zone.id); }
 	}
 	for (s in specters) {
 		if (specterZones.indexOf(s.zone.id) == -1) {
@@ -40,6 +40,10 @@ function saveState() {
 var drakkarSent = false;
 var drakkarSpawnZone = 137;
 var scoutDiscoverTimeout = 40; //time, after which zone will be hidden
+var aggroArmySize = 2; //player army size, from which Valkyrie will attack
+var valkyrieRetreatHp = 40;
+var valkyrieAttackHp = 90;
+var regenHpPerTick = 2; //valkyrie regen rate in percents
 var prevUnits:Array<Unit> = [];
 var newbornSpecters:Array<Unit> = [];
 var specterSpawnTime:Array<Float> = [];
@@ -82,17 +86,21 @@ function onFirstLaunch() {
 	state.objectives.add("Lighthouse", "Build a lighthouse to help other ships find their way here");
 	state.objectives.add("Lost ship", "One of your ships went astray, send expedition to find where it moored");
 
+	state.removeVictory(VictoryKind.VMilitary);
+	state.removeVictory(VictoryKind.VFame);
+	state.removeVictory(VictoryKind.VLore);
+	state.removeVictory(VictoryKind.VMoney);
 	addRule(Rule.VillagerStrike);
 	player.addResource(Resource.Food, 100);
-
+	//player.addResource(Resource.Wood, 60);
 	spawnInitialUnits();
 
-	//valkyrieZones = thorZones.copy();
+	valkyrieZones = thorZones.copy();
 }
 
 function onEachLaunch() {
 	//load valkyries
-	/*for (zone in valkyrieZones) {
+	for (zone in valkyrieZones) {
 		for (unit in getZone(zone).units) {
 			if (unit.kind == Unit.Valkyrie) {
 				valkyries.push(unit);
@@ -105,7 +113,7 @@ function onEachLaunch() {
 				specters.push(unit);
 			}
 		}
-	}*/
+	}
 
 }
 
@@ -223,7 +231,13 @@ function updateFog() {
 }
 
 function updateSpecters() {
-	if (getActiveValkyrie() == null) { return; }
+	if (getActiveValkyrie() == null) {
+		for (s in specters) {
+			s.die(true);
+		}
+		specters = [];
+		return;
+	}
 
 	var rmNewbornSpecters:Array<Unit> = [];
 	var rmSpecterSpawnTime:Array<Float> = [];
@@ -265,32 +279,70 @@ function getValkyrieThorZone(valkyrie:Unit) {
 	return getZone(thorZones[i]);
 }
 
-function updateValkyries() {
-	//remove dead specters from array
-	specters = specters.filter(function (unit) {return unit.zone != null; } );
-	//valkyrie AI
+function attackUnit(unit:Unit) {
+	for (s in specters) {
+		s.moveToZone(unit.zone, true, null, unit);
+	}
 	var valkyrie = getActiveValkyrie();
-	if (valkyrie == null) {
-		var waitSpecters = false;
-		for (s in specters) {
-			if (s.zone != valkyrie.zone) {
-				s.moveToZone(valkyrie.zone, false);
-				waitSpecters = true;
-			}
-		}
-		if (waitSpecters) { return; }
-		var armySize = player.getMilitaryCount();
-		if (armySize <= 3) {
-			valkyrie.moveToZone(getValkyrieThorZone(valkyrie), false);
+	valkyrie.moveToZone(unit.zone, true, null, unit);
+}
+
+function getUnitHealthPercents(unit: Unit) {
+	return unit.life / unit.maxLife * 100;
+}
+
+function regenerate(units: Array<Unit>, zones: Array<Int>) {
+	for (u in units) {
+		if (u.zone == null) { continue; }
+		if (zones.indexOf(u.zone.id) != -1) {
+			u.hitLife -= (u.maxLife / 100 * regenHpPerTick);
+			if (u.hitLife < 0) { u.hitLife = 0; }
 		}
 	}
+}
+
+function updateValkyries() {
+	//remove dead specters from array
+	specters = [for (s in specters ) if (s.zone != null) s];
+	//regenerate
+	regenerate(valkyries, thorZones);
+	regenerate(specters, thorZones);
+	//valkyrie AI
+	var valkyrie = getActiveValkyrie();
+	if (valkyrie != null) {
+		var armySize = player.getMilitaryCount();
+		if (armySize < aggroArmySize || getUnitHealthPercents(valkyrie) < valkyrieRetreatHp) { //move back to Thore
+			var baseZone = getValkyrieThorZone(valkyrie);
+			if (valkyrie.zone != baseZone) {
+				for (s in specters) {
+					s.moveToZone(baseZone, false);
+				}
+				valkyrie.moveToZone(baseZone, false);
+			}
+		}
+		else if (getUnitHealthPercents(valkyrie) > valkyrieAttackHp) {
+			for (unit in valkyrie.zone.units) {
+				if (unit.isMilitary && unit.owner == player) {
+					attackUnit(unit);
+					return;
+				}
+			}
+			for (unit in player.units) {
+				if (unit.isMilitary) {
+					attackUnit(unit);
+					return;
+				}
+			}
+		}
+	}
+
+	updateSpecters();
 }
 
 // Regular update is called every 0.5s
 function regularUpdate(dt : Float) {
 	updateFog();
 	updateValkyries();
-	updateSpecters();
 
 	var sheepsNum = 0;
 	for (unit in player.zones[0].units) {
