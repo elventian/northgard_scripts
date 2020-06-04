@@ -11,6 +11,10 @@ var valkyrieZones:Array<Int> = [];
 var specterZones:Array<Int> = [];
 var valkyries:Array<Unit> = [];
 var specters:Array<Unit> = [];
+var shipArriveTime:Float = 0;
+var curShipDelta:Float = 0;
+var wyvernZone = 88;
+var wyvern:Unit;
 
 function saveState() {
 	valkyrieZones = [];
@@ -22,6 +26,7 @@ function saveState() {
 			specterZones.push(s.zone.id);
 		}
 	}
+	wyvernZone = wyvern.zone.id;
 	state.scriptProps = {
 		savedInt 		: savedInt,
 		prevDiscoveredZones: prevDiscoveredZones,
@@ -31,22 +36,29 @@ function saveState() {
 		scoutZonesTime: scoutZonesTime,
 		prevUnitZones: prevUnitZones,
 		valkyrieZones: valkyrieZones,
-		specterZones: specterZones
+		specterZones: specterZones,
+		shipArriveTime: shipArriveTime,
+		curShipDelta: curShipDelta,
+		wyvernZone: wyvernZone
 	};
 }
 
 
-// --- Local variables ---
-var drakkarSent = false;
+// --- Settings ---
 var drakkarSpawnZone = 137;
 var scoutDiscoverTimeout = 40; //time, after which zone will be hidden
-var aggroArmySize = 2; //player army size, from which Valkyrie will attack
+var aggroArmySize = 4; //player army size, from which Valkyrie will attack
 var valkyrieRetreatHp = 40;
 var valkyrieAttackHp = 90;
+var shipSpawnDelay = 480; //sec
+var shipSpawnDelta = 60; //sec
+// --- Local variables ---
+var suppliesSent = true;
 var regenHpPerTick = 2; //valkyrie regen rate in percents
 var prevUnits:Array<Unit> = [];
 var newbornSpecters:Array<Unit> = [];
 var specterSpawnTime:Array<Float> = [];
+var shipwrack = 128;
 var thorZones = [102,82,77];
 var zones = [122, 107, 112, 127, 136, 121, 93, 64, 100, 86, 72, 57, 111, 91, 79, 69, 49, 128, 113, 101, 87, 76, 61, 134, 124, 110, 97, 82, 63,
 54, 130, 117, 102, 88, 75, 59, 106, 94, 77, 85];
@@ -79,12 +91,101 @@ function init() {
 	onEachLaunch();
 }
 
-function onFirstLaunch() {
-	state.objectives.title = "Settle on island and find its secrets"; //TODO: why not displayed?
+function createObjectives() {
+	state.objectives.title = "Settle on island and find its secrets"; //FIXME: why not displayed?
 	state.objectives.summary = "Settle on island and find its secrets";
 
+	state.objectives.add("Watchtower", "Here we are, on this beautiful untouched island. Let's look around. Build a Defense Tower");
 	state.objectives.add("Lighthouse", "Build a lighthouse to help other ships find their way here");
-	state.objectives.add("Lost ship", "One of your ships went astray, send expedition to find where it moored");
+	state.objectives.add("Lost ship", "One of our ships went astray, send expedition to find where it moored");
+	state.objectives.add("Specters", "What was that?! One of our people just died and turned into a ghost! Follow him");
+	state.objectives.add("Guards", "Looks like they defend something. Island from strangers? They won't let us settle here, we have to end them.");
+	state.objectives.add("Wyvern", "Valkyries guarded ancient evil beast - Undead Wyvern... and we let it free. Kill or be killed!");
+	state.objectives.setVisible("Lighthouse", false);
+	state.objectives.setVisible("Lost ship", false);
+	state.objectives.setVisible("Specters", false);
+	state.objectives.setVisible("Guards", false);
+	state.objectives.setVisible("Wyvern", false);
+}
+
+function objectiveDone(name: String) {
+	state.objectives.setStatus(name, OStatus.Done);
+	state.objectives.setVisible(name, false);
+}
+
+function updateObjectives() {
+	if (state.objectives.getStatus("Watchtower") == OStatus.Empty) {
+		trace("Check Watchtower");
+		if (player.hasBuilding(Building.WatchTower, false)) {
+			objectiveDone("Watchtower");
+			state.objectives.setVisible("Lighthouse", true);
+			state.objectives.setVisible("Lost ship", true);
+		}
+	}
+	else {
+		trace("Check Lighthouse");
+		if (state.objectives.getStatus("Lighthouse") == OStatus.Empty) {
+			if (player.hasBuilding(Building.Port, false, false, true)) {
+				objectiveDone("Lighthouse");
+			}
+		}
+
+		trace("Check Lost ship");
+		if (state.objectives.getStatus("Lost ship") == OStatus.Empty) {
+			var shipZone = getZone(shipwrack);
+			if (player.hasDiscovered(shipZone)) {
+				objectiveDone("Lost ship");
+				shipZone.addUnit(Unit.Sailor, 3);
+				shipZone.addUnit(Unit.Death, 1);
+				moveCamera(shipZone);
+			}
+		}
+	}
+
+	trace("Check Specters");
+	if (state.objectives.getStatus("Specters") == OStatus.Empty) {
+		if (!state.objectives.isVisible("Specters") && specters.length > 0) {
+			state.objectives.setVisible("Specters", true);
+			moveCamera(specters[0].zone);
+		}
+		for (zoneId in thorZones) {
+			var zone = getZone(zoneId);
+			var done = false;
+			if (player.hasDiscovered(zone)) {
+				for (unit in zone.units) {
+					if (unit.kind == Unit.SpecterWarrior) {
+						moveCamera(zone);
+						objectiveDone("Specters");
+						state.objectives.setVisible("Guards", true);
+						done = true;
+						break;
+					}
+				}
+			}
+			if (done) { break; }
+		}
+	}
+
+	trace("Check Guards");
+	if (state.objectives.getStatus("Guards") == OStatus.Empty && getActiveValkyrie() == null) {
+		objectiveDone("Guards");
+		state.objectives.setVisible("Wyvern", true);
+	}
+
+	trace("Check Wyvern");
+	if (state.objectives.isVisible("Wyvern")) {
+		if (wyvern.zone == null) {
+			player.triggerVictory(VictoryKind.VHelheim);
+		}
+		else if (player.units.length == 0) {
+			customDefeat("All your units are dead");
+		}
+	}
+
+}
+
+function onFirstLaunch() {
+	createObjectives();
 
 	state.removeVictory(VictoryKind.VMilitary);
 	state.removeVictory(VictoryKind.VFame);
@@ -92,9 +193,11 @@ function onFirstLaunch() {
 	state.removeVictory(VictoryKind.VMoney);
 	addRule(Rule.VillagerStrike);
 	player.addResource(Resource.Food, 100);
+	//player.addResource(Resource.Money, 500);
+	player.setTech([Tech.Drakkars]);
 	//player.addResource(Resource.Wood, 60);
 	spawnInitialUnits();
-
+	curShipDelta = random(shipSpawnDelta) - shipSpawnDelta/2;
 	valkyrieZones = thorZones.copy();
 }
 
@@ -115,6 +218,12 @@ function onEachLaunch() {
 		}
 	}
 
+	wyvern = null;
+	for (unit in getZone(wyvernZone).units) {
+		if (unit.kind == Unit.WyvernUndead) {
+			wyvern = unit;
+		}
+	}
 }
 
 function spawnInitialUnits() {
@@ -124,16 +233,14 @@ function spawnInitialUnits() {
 }
 
 function generateDrakkarUnits(): Array<UnitKind> {
-	var armySize = randomInt(6);
+	var armySize = randomInt(5);
 	var axeNum = randomInt(3);
-	var civilNum = randomInt(3);
-	var sheepNum = randomInt(2) + 1;
+	var civilNum = randomInt(2);
 
 	var res:Array<UnitKind> = [];
 	for (i in 0...axeNum) { res.push(Unit.AxeWielder); }
 	for (i in 0...(armySize - axeNum)) { res.push(Unit.Warrior); }
 	for (i in 0...civilNum) { res.push(Unit.Villager); }
-	for (i in 0...sheepNum) { res.push(Unit.Wolf); }
 	return res;
 }
 
@@ -145,6 +252,8 @@ function playerHasUnitsInZone(zone: Zone) {
 }
 
 function updateFog() {
+	var prevTime:Float = state.time;
+	trace("update fog");
 	//register zones, opened by Scouts (need hide them after time)
 	if (prevDiscoveredZones.length > 0) {
 		for (zone in player.discovered) {
@@ -156,6 +265,8 @@ function updateFog() {
 			}
 		}
 	}
+	trace("towers scout", state.time - prevTime);
+	prevTime = state.time;
 
 	//discover new zones, opened by watch towers
 	towerZones = [];
@@ -177,6 +288,9 @@ function updateFog() {
 		}
 	}
 
+	trace("towers filled", state.time - prevTime);
+	prevTime = state.time;
+
 	//hide zones that are no longer discovered by watch towers or scout timeout
 	var needHide = false;
 	for (zone in prevTowerZones) {
@@ -192,6 +306,10 @@ function updateFog() {
 			else { needHide = true; }
 		}
 	}
+
+	trace("tower hide checked", state.time - prevTime);
+	prevTime = state.time;
+
 	var tmpScoutZones:Array<Int> = [];
 	var tmpScoutZonesTime:Array<Float> = [];
 	for (i in 0...scoutZones.length) {
@@ -228,6 +346,9 @@ function updateFog() {
 	for (zone in player.discovered) {
 		prevDiscoveredZones.push(zone.id);
 	}
+
+	trace("done with towers", state.time - prevTime);
+	prevTime = state.time;
 }
 
 function updateSpecters() {
@@ -279,7 +400,7 @@ function getValkyrieThorZone(valkyrie:Unit) {
 	return getZone(thorZones[i]);
 }
 
-function attackUnit(unit:Unit) {
+function valkyrieAttack(unit:Unit) {
 	for (s in specters) {
 		s.moveToZone(unit.zone, true, null, unit);
 	}
@@ -299,6 +420,18 @@ function regenerate(units: Array<Unit>, zones: Array<Int>) {
 			if (u.hitLife < 0) { u.hitLife = 0; }
 		}
 	}
+}
+
+function getUnitWithLessHealth(units: Array<Unit>) {
+	var res = null;
+	var hp:Float = 1000;
+	for (unit in units) {
+		if (unit.isMilitary && unit.owner == player && (res == null || hp > unit.life ) && unit.zone != null) {
+			hp = unit.life;
+			res = unit;
+		}
+	}
+	return res;
 }
 
 function updateValkyries() {
@@ -321,17 +454,12 @@ function updateValkyries() {
 			}
 		}
 		else if (getUnitHealthPercents(valkyrie) > valkyrieAttackHp) {
-			for (unit in valkyrie.zone.units) {
-				if (unit.isMilitary && unit.owner == player) {
-					attackUnit(unit);
-					return;
-				}
+			var unit = getUnitWithLessHealth(valkyrie.zone.units);
+			if (unit == null) {
+				unit = getUnitWithLessHealth(player.units);
 			}
-			for (unit in player.units) {
-				if (unit.isMilitary) {
-					attackUnit(unit);
-					return;
-				}
+			if (unit != null) {
+				valkyrieAttack(unit);
 			}
 		}
 	}
@@ -339,23 +467,60 @@ function updateValkyries() {
 	updateSpecters();
 }
 
+function updateShips() {
+	if (player.hasBuilding(Building.Port, false, false, true)) {
+		var lightZone = player.zones[0];
+		if (shipArriveTime == 0) { //just built lighthouse
+			shipArriveTime = state.time;
+		}
+		else if (state.time - shipArriveTime > shipSpawnDelay + curShipDelta) { //spawn drakkar
+			curShipDelta = randomInt(shipSpawnDelta) - shipSpawnDelta/2;
+			shipArriveTime = state.time;
+			suppliesSent = false;
+			//TODO check where's lighthouse
+			drakkar(player, lightZone, getZone(drakkarSpawnZone), 0, 0, generateDrakkarUnits());
+		}
+		//FIX: I cannot send ships with drakkar via API
+		if (!suppliesSent && state.time - shipArriveTime > 10) {
+			suppliesSent = true;
+			var shipsNum = randomInt(3) + 1;
+			lightZone.addUnit(Unit.Sheep, shipsNum);
+		}
+	}
+}
+
+function updateWyvern() {
+	if (wyvern.zone == null || getActiveValkyrie() != null) { return; } //activate only when valkyries are dead
+	if (player.units.length > 0) {
+		if (wyvern.zone.units.length <= 1) { //self
+			var unit = getUnitWithLessHealth(player.units);
+			wyvern.moveToZone(unit.zone, true, null, unit);
+		}
+	}
+}
+
+var shipTime:Float = 0;
 // Regular update is called every 0.5s
 function regularUpdate(dt : Float) {
+	trace("updateFog");
 	updateFog();
+	trace("updateValkyries");
 	updateValkyries();
+	trace("updateWyvern");
+	updateWyvern();
+	trace("updateShips");
+	updateShips();
+	trace("updateObjectives");
+	updateObjectives();
 
-	var sheepsNum = 0;
-	for (unit in player.zones[0].units) {
-		if (unit.kind == Unit.Sheep) { sheepsNum++; }
-	}
+	trace("prevUnitZones");
 
-	if (state.time > 5 && !drakkarSent) {
-		drakkarSent = true;
-		//drakkar(player, player.zones[0], getZone(drakkarSpawnZone), 0, 0, generateDrakkarUnits());
-	}
 	prevUnits = player.units.copy();
 	prevUnitZones = [];
 	for (i in 0...player.units.length) {
-		prevUnitZones[i] = player.units[i].zone.id;
+		if (player.units[i].zone != null) {
+			prevUnitZones[i] = player.units[i].zone.id;
+		}
 	}
+	trace("regularUpdate end");
 }
