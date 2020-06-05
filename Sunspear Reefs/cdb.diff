@@ -1,5 +1,23 @@
 {
 	"unit": {
+		"Warrior": {
+			"props": {
+				"recruitCost": {
+					"0": {
+						"qty": 5
+					}
+				}
+			}
+		},
+		"ShieldBearer": {
+			"props": {
+				"recruitCost": {
+					"0": {
+						"qty": 10
+					}
+				}
+			}
+		},
 		"Valkyrie": {
 			"props": {
 				"projectileResist": 0.7
