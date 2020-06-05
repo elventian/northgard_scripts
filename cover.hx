@@ -115,7 +115,6 @@ function objectiveDone(name: String) {
 
 function updateObjectives() {
 	if (state.objectives.getStatus("Watchtower") == OStatus.Empty) {
-		trace("Check Watchtower");
 		if (player.hasBuilding(Building.WatchTower, false)) {
 			objectiveDone("Watchtower");
 			state.objectives.setVisible("Lighthouse", true);
@@ -123,14 +122,12 @@ function updateObjectives() {
 		}
 	}
 	else {
-		trace("Check Lighthouse");
 		if (state.objectives.getStatus("Lighthouse") == OStatus.Empty) {
 			if (player.hasBuilding(Building.Port, false, false, true)) {
 				objectiveDone("Lighthouse");
 			}
 		}
 
-		trace("Check Lost ship");
 		if (state.objectives.getStatus("Lost ship") == OStatus.Empty) {
 			var shipZone = getZone(shipwrack);
 			if (player.hasDiscovered(shipZone)) {
@@ -142,7 +139,6 @@ function updateObjectives() {
 		}
 	}
 
-	trace("Check Specters");
 	if (state.objectives.getStatus("Specters") == OStatus.Empty) {
 		if (!state.objectives.isVisible("Specters") && specters.length > 0) {
 			state.objectives.setVisible("Specters", true);
@@ -166,13 +162,11 @@ function updateObjectives() {
 		}
 	}
 
-	trace("Check Guards");
 	if (state.objectives.getStatus("Guards") == OStatus.Empty && getActiveValkyrie() == null) {
 		objectiveDone("Guards");
 		state.objectives.setVisible("Wyvern", true);
 	}
 
-	trace("Check Wyvern");
 	if (state.objectives.isVisible("Wyvern")) {
 		if (wyvern.zone == null) {
 			player.triggerVictory(VictoryKind.VHelheim);
@@ -181,7 +175,7 @@ function updateObjectives() {
 			customDefeat("All your units are dead");
 		}
 	}
-
+	heartbeat();
 }
 
 function onFirstLaunch() {
@@ -226,6 +220,12 @@ function onEachLaunch() {
 	}
 }
 
+//FIX: if regularUpdate runs for too long, the game will exit
+//need to show to main thread, that I'm alive
+function heartbeat() {
+	wait(0.01);
+}
+
 function spawnInitialUnits() {
 	player.zones[0].addUnit(Unit.Warrior, 2, player);
 	player.zones[0].addUnit(Unit.AxeWielder, 1, player);
@@ -252,33 +252,30 @@ function playerHasUnitsInZone(zone: Zone) {
 }
 
 function updateFog() {
-	var prevTime:Float = state.time;
-	trace("update fog");
 	//register zones, opened by Scouts (need hide them after time)
 	if (prevDiscoveredZones.length > 0) {
 		for (zone in player.discovered) {
-			if (prevDiscoveredZones.indexOf(zone.id) == -1 &&
-				towerZones.indexOf(zone.id) == -1 &&
+			if (towerZones.indexOf(zone.id) == -1 &&
+				prevDiscoveredZones.indexOf(zone.id) == -1 &&
 				scoutZones.indexOf(zone.id) == -1) {
 				scoutZones.push(zone.id);
 				scoutZonesTime.push(state.time);
 			}
 		}
 	}
-	trace("towers scout", state.time - prevTime);
-	prevTime = state.time;
 
 	//discover new zones, opened by watch towers
 	towerZones = [];
 	for (zone in player.zones) {
 		for (building in zone.buildings) {
 			if (building.kind == Building.WatchTower) {
+				heartbeat();
 				var nb:Array<Int> = getNeighbours(zone.id);
 				for (neighbourId in nb) {
-					var neighZone = getZone(neighbourId);
 					if (towerZones.indexOf(neighbourId) == -1) {
 						towerZones.push(neighbourId);
 					}
+					var neighZone = getZone(neighbourId);
 					if (!player.hasDiscovered(neighZone)) {
 						player.discoverZone(neighZone);
 					}
@@ -287,9 +284,6 @@ function updateFog() {
 			}
 		}
 	}
-
-	trace("towers filled", state.time - prevTime);
-	prevTime = state.time;
 
 	//hide zones that are no longer discovered by watch towers or scout timeout
 	var needHide = false;
@@ -306,9 +300,6 @@ function updateFog() {
 			else { needHide = true; }
 		}
 	}
-
-	trace("tower hide checked", state.time - prevTime);
-	prevTime = state.time;
 
 	var tmpScoutZones:Array<Int> = [];
 	var tmpScoutZonesTime:Array<Float> = [];
@@ -347,8 +338,7 @@ function updateFog() {
 		prevDiscoveredZones.push(zone.id);
 	}
 
-	trace("done with towers", state.time - prevTime);
-	prevTime = state.time;
+	heartbeat();
 }
 
 function updateSpecters() {
@@ -385,6 +375,7 @@ function updateSpecters() {
 			}
 		}
 	}
+	heartbeat();
 }
 
 function getActiveValkyrie() {
@@ -464,7 +455,17 @@ function updateValkyries() {
 		}
 	}
 
+	heartbeat();
+
 	updateSpecters();
+
+	prevUnits = player.units.copy();
+	prevUnitZones = [];
+	for (i in 0...player.units.length) {
+		if (player.units[i].zone != null) {
+			prevUnitZones[i] = player.units[i].zone.id;
+		}
+	}
 }
 
 function updateShips() {
@@ -487,6 +488,7 @@ function updateShips() {
 			lightZone.addUnit(Unit.Sheep, shipsNum);
 		}
 	}
+	heartbeat();
 }
 
 function updateWyvern() {
@@ -497,30 +499,14 @@ function updateWyvern() {
 			wyvern.moveToZone(unit.zone, true, null, unit);
 		}
 	}
+	heartbeat();
 }
 
-var shipTime:Float = 0;
 // Regular update is called every 0.5s
 function regularUpdate(dt : Float) {
-	trace("updateFog");
 	updateFog();
-	trace("updateValkyries");
 	updateValkyries();
-	trace("updateWyvern");
 	updateWyvern();
-	trace("updateShips");
 	updateShips();
-	trace("updateObjectives");
 	updateObjectives();
-
-	trace("prevUnitZones");
-
-	prevUnits = player.units.copy();
-	prevUnitZones = [];
-	for (i in 0...player.units.length) {
-		if (player.units[i].zone != null) {
-			prevUnitZones[i] = player.units[i].zone.id;
-		}
-	}
-	trace("regularUpdate end");
 }
