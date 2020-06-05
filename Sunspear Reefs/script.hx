@@ -47,7 +47,7 @@ function saveState() {
 // --- Settings ---
 var drakkarSpawnZone = 137;
 var scoutDiscoverTimeout = 180; //time, after which zone will be hidden
-var aggroArmySize = 4; //player army size, from which Valkyrie will attack
+var aggroArmySize = 5; //player army size, from which Valkyrie will attack
 var valkyrieRetreatHp = 40;
 var valkyrieAttackHp = 90;
 var shipSpawnDelay = 480; //sec
@@ -66,10 +66,10 @@ var zones = [122, 107, 112, 127, 136, 121, 93, 64, 100, 86, 72, 57, 111, 91, 79,
 54, 130, 117, 102, 88, 75, 59, 106, 94, 77, 85];
 var hideObjetives:Array<String> = [];
 var hideObjetivesTime:Array<Float> = [];
-                                     //122              107                   112                     127         136        121
-var neighbours:Array<Array<Int>> = [[107,112,127], [122,112,100], [107,122,127,111,91,100,121], [122,112,136], [127,121], [112,111,113,128],
-// 93                64     100                    86              72            57             111                         91
-[107,100,86,72,64], [57], [93,86,91,111,112,107], [93,100,91,79], [57,69,86,79], [64,72,69,49], [112,100,91,101,121,113], [100,86,79,87,101,111,112],
+                                     //122              107         112                     127         136        121
+var vNeighbours:Array<Array<Int>> = [[107,112,127], [122,112,100], [107,122,127,111,91,100,121], [122,112,136], [127,121], [112,111,113,128],
+// 93                64     100                    86                 72            57             111                         91
+[107,100,86,72,64], [57], [93,86,91,111,112,107], [93,100,91,79,72], [57,69,86,79], [64,72,69,49], [112,100,91,101,121,113], [100,86,79,87,101,111,112],
 //79              69                      49           128           113         101                        87                     76
 [86,72,69,76,91], [72,57,49,61,76,79,86], [57,69,61], [121,113,124], [121,110], [113,111,91,87,82,97,110], [91,79,76,82,97,101], [79,69,61,63,82,87],
 //61               134           124                         110                97                          82             63
@@ -78,6 +78,28 @@ var neighbours:Array<Array<Int>> = [[107,112,127], [122,112,100], [107,122,127,1
 [61,59,49,63], [134], [130,124,110,102,106], [110,97,88,94,117], [82,75,77,94,102], [82,63,59,77,88], [54,63,75,77], [117,102,94,85], [102,88,77,85],
 //77            85
 [88,75,94,85], [94,77]];
+
+									//122              107                   112              127       136        121
+var neighbours:Array<Array<Int>> = [[107,112,127], [122,100], [122,127,111,91,100,121], [122,112,136], [127], [112,111,113,128],
+// 93      64     100                    86                 72            57             111                         91
+[100,86], [57], [93,86,91,111,112,107], [93,100,79,72], [57,69,86,79], [64,72,69,49], [112,100,91,101,121], [100,87,101,111,112],
+//79              69                      49     128           113         101             87                     76
+[86,72,69,76], [72,57,49,61,76,79,86], [57,69], [121,113,124], [121,110], [111,91,87,97], [91,76,101], [79,69,61,63,87],
+//61            134        124                110                97            82             63
+[69,76,63,54], [124,130], [128,110,117,134], [113,102,117,124], [101,82,102], [63,75,88,97], [61,54,75,82,76],
+//54         130    117                   102                 88                  75        59     106     94
+[61,59,63], [134], [124,110,102,106], [110,97,88,94,117], [82,77,94,102], [82,63,59,77], [54,75], [117], [102,88,77],
+//77            85
+[88,75,94,85], [77]];
+
+function getVisNeighbours(zoneId: Int) : Array<Int> {
+	for (i in 0...zones.length) {
+		if (zones[i] == zoneId) {
+			return vNeighbours[i].copy();
+		}
+	}
+	return vNeighbours[0].copy();
+}
 
 function getNeighbours(zoneId: Int) : Array<Int> {
 	for (i in 0...zones.length) {
@@ -291,7 +313,7 @@ function updateFog() {
 		for (building in zone.buildings) {
 			if (building.kind == Building.WatchTower) {
 				heartbeat();
-				var nb:Array<Int> = getNeighbours(zone.id);
+				var nb:Array<Int> = getVisNeighbours(zone.id);
 				for (neighbourId in nb) {
 					if (towerZones.indexOf(neighbourId) == -1) {
 						towerZones.push(neighbourId);
@@ -446,6 +468,61 @@ function getUnitWithLessHealth(units: Array<Unit>) {
 	return res;
 }
 
+function findPathNoCarvedStones(fromZone:Zone, toZone:Zone): Zone {
+	if (fromZone.id == toZone.id) { return fromZone; }
+	trace("~~~~ from " + fromZone.id + " to " + toZone.id);
+	var handledZones:Array<Int> = [fromZone.id];
+	var searchQueue:Array<Int> = [fromZone.id];
+	var parents:Array<Array<Int>> = [];
+	while (searchQueue.length > 0) {
+		var curZoneId = searchQueue.pop();
+		var nZones = getNeighbours(curZoneId);
+		for (n in nZones) {
+			if (handledZones.indexOf(n) == -1) {
+				handledZones.push(n);
+				var nZone = getZone(n);
+				var blocked = false;
+				for (b in nZone.buildings) {
+					if (b.kind == Building.CarvedStone) {
+						blocked = true;
+						break;
+					}
+				}
+				if (!blocked) {
+					if (n == toZone.id) { // found path!
+						heartbeat();
+						var curParent = curZoneId;
+						trace(curParent);
+						var i = 0;
+						while (i < parents.length) {
+							if (parents[i][0] == curParent) {
+								if (parents[i][1] == fromZone.id) {
+									trace(parents);
+									heartbeat();
+									return getZone(curParent);
+								}
+								curParent = parents[i][1];
+								trace(curParent);
+								i = 0;
+								continue;
+							}
+							i++;
+						}
+					}
+					else {
+						searchQueue.insert(0, n);
+						parents.push([n, curZoneId]);
+					}
+				}
+			}
+			heartbeat();
+		}
+	}
+	trace("NO PATH");
+	trace(parents);
+	return null;
+}
+
 function updateValkyries() {
 	//remove dead specters from array
 	specters = [for (s in specters ) if (s.zone != null) s];
@@ -455,6 +532,7 @@ function updateValkyries() {
 	//valkyrie AI
 	var valkyrie = getActiveValkyrie();
 	if (valkyrie != null) {
+		findPathNoCarvedStones(player.units[0].zone, valkyrie.zone);
 		var armySize = player.getMilitaryCount();
 		if (armySize < aggroArmySize || getUnitHealthPercents(valkyrie) < valkyrieRetreatHp) { //move back to Thore
 			var baseZone = getValkyrieThorZone(valkyrie);
@@ -471,6 +549,7 @@ function updateValkyries() {
 				unit = getUnitWithLessHealth(player.units);
 			}
 			if (unit != null) {
+				//findPath(valkyrie.zone, unit.zone);
 				valkyrieAttack(unit);
 			}
 		}
