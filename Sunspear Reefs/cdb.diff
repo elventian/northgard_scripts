@@ -1,0 +1,42 @@
+{
+	"unit": {
+		"Valkyrie": {
+			"props": {
+				"projectileResist": 0.7
+			}
+		},
+		"SpecterWarrior": {
+			"props": {
+				"moveSpeed": 1.4,
+				"runSpeedCoeff": 4
+			}
+		}
+	},
+	"building": {
+		"CarvedStone": {
+			"cost": {
+				"0": {
+					"r": "Gemstone"
+				}
+			}
+		},
+		"Sheepfold": {
+			"props": {
+				"maxNb": null,
+				"onlyForClans": {
+					"0": {
+						"clan": "Wolf"
+					}
+				}
+			}
+		},
+		"WatchTower": {
+			"props": {
+				"maxNb": 6
+			}
+		},
+		"TownHall": {
+			"cost": []
+		}
+	}
+}
