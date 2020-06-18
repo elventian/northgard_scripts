@@ -28,16 +28,19 @@
 				"moveSpeed": 1.4,
 				"runSpeedCoeff": 4
 			}
+		},
+		"IceGolem": {
+			"phases": {
+				"0": {
+					"pv": 8,
+					"atk": 10,
+					"def": 5,
+					"xp": 0
+				}
+			}
 		}
 	},
 	"building": {
-		"CarvedStone": {
-			"cost": {
-				"0": {
-					"r": "Gemstone"
-				}
-			}
-		},
 		"Sheepfold": {
 			"props": {
 				"maxNb": null,

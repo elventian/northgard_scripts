@@ -13,8 +13,9 @@ var valkyries:Array<Unit> = [];
 var specters:Array<Unit> = [];
 var shipArriveTime:Float = 0;
 var curShipDelta:Float = 0;
-var wyvernZone = 88;
-var wyvern:Unit;
+var bossZone = 88;
+var boss:Unit;
+var needProtectionTime:Float = 0;
 
 function saveState() {
 	valkyrieZones = [];
@@ -27,7 +28,9 @@ function saveState() {
 			specterZones.push(s.zone.id);
 		}
 	}
-	wyvernZone = wyvern.zone.id;
+	if (boss.zone != null) {
+		bossZone = boss.zone.id;
+	}
 	state.scriptProps = {
 		savedInt 		: savedInt,
 		prevDiscoveredZones: prevDiscoveredZones,
@@ -40,7 +43,7 @@ function saveState() {
 		specterZones: specterZones,
 		shipArriveTime: shipArriveTime,
 		curShipDelta: curShipDelta,
-		wyvernZone: wyvernZone
+		bossZone: bossZone
 	};
 }
 
@@ -55,6 +58,7 @@ var shipSpawnDelta = 60; //sec
 var regenHpPerTick = 2; //valkyrie regen rate in percents
 var specterSpawnDelay = 10; //spawned specters will stay in zone for that time, then move to its mistress
 var hideObjetivesTimeout = 10; //leave objective in list for n sec after it's Done
+var showProtectionTimeout = 240; //time after which we show how to protect from specters
 // --- Local variables ---
 var suppliesSent = true;
 var prevUnits:Array<Unit> = [];
@@ -62,6 +66,7 @@ var newbornSpecters:Array<Unit> = [];
 var specterSpawnTime:Array<Float> = [];
 var shipwrack = 128;
 var thorZones = [102,82,77];
+var carvedStones = [86,76,63,54];
 var zones = [122, 107, 112, 127, 136, 121, 93, 64, 100, 86, 72, 57, 111, 91, 79, 69, 49, 128, 113, 101, 87, 76, 61, 134, 124, 110, 97, 82, 63,
 54, 130, 117, 102, 88, 75, 59, 106, 94, 77, 85];
 var hideObjetives:Array<String> = [];
@@ -121,17 +126,21 @@ function createObjectives() {
 	state.objectives.title = "Settle on island and find its secrets"; //FIXME: why not displayed?
 	state.objectives.summary = "Settle on island and find its secrets";
 
-	state.objectives.add("Watchtower", "We traveled to Sunspear Reefs to build new home on this beautiful untouched island. And finally we're here! Let's look around. Build a Defense Tower");
+	state.objectives.add("Watchtower", "We sailed to Sunspear Reefs to build new home. And finally we're here, on this beautiful untouched island! Let's look around. Build a Defense Tower");
 	state.objectives.add("Lighthouse", "Build a lighthouse to help our ships find their way here");
-	state.objectives.add("LostShip", "When we reached the island from south, one our ship went astray. Send expedition to find where she moored");
-	state.objectives.add("Specters", "What was that?! One of our people just died and turned into a ghost! Follow him");
-	state.objectives.add("Guards", "Looks like they defend something. Island from strangers? They won't let us settle here, we have to end them.");
-	state.objectives.add("Wyvern", "Valkyries guarded ancient evil beast - Undead Wyvern... and we let it free. Kill or be killed!");
+	state.objectives.add("LostShip", "When we reached the island from south, our second ship went astray. Send expedition to find where she moored");
+	state.objectives.add("Specters", "What was that?! One of our people just died and turned into a ghost! We need to investigate this. Follow him");
+	state.objectives.add("Protection", "We cannot gather big enough army to kill all specters... Need to find a way to stop their raids");
+	state.objectives.add("Stones", "Someone built those Carved Stones as a protection from specters. We should try it too");
+	state.objectives.add("Guards", "Looks like they defend something. Island from strangers? Looks like they won't let us settle, we have to end them");
+	state.objectives.add("Boss", "Valkyries guarded ancient evil creature... and we let it free. Kill or be killed!");
 	state.objectives.setVisible("Lighthouse", false);
 	state.objectives.setVisible("LostShip", false);
 	state.objectives.setVisible("Specters", false);
+	state.objectives.setVisible("Protection", false);
+	state.objectives.setVisible("Stones", false);
 	state.objectives.setVisible("Guards", false);
-	state.objectives.setVisible("Wyvern", false);
+	state.objectives.setVisible("Boss", false);
 }
 
 function objectiveDone(name: String) {
@@ -155,6 +164,8 @@ function updateObjectives() {
 		hideObjetivesTime.pop();
 	}
 
+	heartbeat();
+
 	if (state.objectives.getStatus("Watchtower") == OStatus.Empty) {
 		if (player.hasBuilding(Building.WatchTower, false)) {
 			objectiveDone("Watchtower");
@@ -163,11 +174,15 @@ function updateObjectives() {
 		}
 	}
 
+	heartbeat();
+
 	if (state.objectives.getStatus("Lighthouse") == OStatus.Empty) {
 		if (player.hasBuilding(Building.Port, false, false, true)) {
 			objectiveDone("Lighthouse");
 		}
 	}
+
+	heartbeat();
 
 	if (state.objectives.getStatus("LostShip") == OStatus.Empty) {
 		var shipZone = getZone(shipwrack);
@@ -175,11 +190,13 @@ function updateObjectives() {
 			objectiveDone("LostShip");
 			shipZone.addUnit(Unit.Sailor, 2);
 			var warrior = shipZone.addUnit(Unit.Warrior)[0];
-			warrior.hitLife = warrior.maxLife * 0.05;
+			warrior.hitLife = warrior.maxLife * 0.85;
 			shipZone.addUnit(Unit.Bear);
 			moveCamera(shipZone);
 		}
 	}
+
+	heartbeat();
 
 	if (state.objectives.getStatus("Specters") == OStatus.Empty) {
 		if (!state.objectives.isVisible("Specters") && newbornSpecters.length > 0) {
@@ -197,6 +214,9 @@ function updateObjectives() {
 						objectiveDone("Specters");
 						state.objectives.setVisible("Guards", true);
 						done = true;
+						for (zone in valkyrieZones) {
+							player.discoverZone(getZone(zone));
+						}
 						break;
 					}
 				}
@@ -204,14 +224,40 @@ function updateObjectives() {
 			if (done) { break; }
 		}
 	}
+	else if (state.objectives.getStatus("Protection") == OStatus.Empty) {
+		if (specters.length > 10 && !state.objectives.isVisible("Protection")) {
+			state.objectives.setVisible("Protection", true);
+			needProtectionTime = state.time;
+		}
+		else if (state.objectives.isVisible("Protection") &&
+		needProtectionTime + showProtectionTimeout < state.time) {
+			objectiveDone("Protection");
+			for (zone in carvedStones) {
+				player.discoverZone(getZone(zone));
+			}
+			moveCamera(getZone(carvedStones[2]));
+			state.objectives.setVisible("Stones", true);
+		}
+		heartbeat();
+	}
+
+	if (state.objectives.getStatus("Stones") == OStatus.Empty &&
+	state.objectives.isVisible("Stones") &&
+	player.hasBuilding(Building.CarvedStone)) {
+		objectiveDone("Stones");
+	}
+
+	heartbeat();
 
 	if (state.objectives.getStatus("Guards") == OStatus.Empty && getActiveValkyrie() == null) {
 		objectiveDone("Guards");
-		state.objectives.setVisible("Wyvern", true);
+		state.objectives.setVisible("Boss", true);
 	}
 
-	if (state.objectives.isVisible("Wyvern")) {
-		if (wyvern.zone == null) {
+	heartbeat();
+
+	if (state.objectives.isVisible("Boss")) {
+		if (boss.zone == null) {
 			player.triggerVictory(VictoryKind.VHelheim);
 		}
 		else if (player.units.length == 0) {
@@ -230,9 +276,7 @@ function onFirstLaunch() {
 	state.removeVictory(VictoryKind.VMoney);
 	addRule(Rule.VillagerStrike);
 	player.addResource(Resource.Food, 160);
-	//player.addResource(Resource.Money, 500);
 	player.setTech([Tech.Drakkars]);
-	//player.addResource(Resource.Wood, 60);
 	spawnInitialUnits();
 	curShipDelta = random(shipSpawnDelta) - shipSpawnDelta/2;
 	valkyrieZones = thorZones.copy();
@@ -255,10 +299,11 @@ function onEachLaunch() {
 		}
 	}
 
-	wyvern = null;
-	for (unit in getZone(wyvernZone).units) {
-		if (unit.kind == Unit.WyvernUndead) {
-			wyvern = unit;
+	boss = null;
+	for (unit in getZone(bossZone).units) {
+		if (unit.kind == Unit.IceGolem) {
+			boss = unit;
+			break;
 		}
 	}
 }
@@ -266,7 +311,7 @@ function onEachLaunch() {
 //FIX: if regularUpdate runs for too long, the game will exit
 //need to show to main thread, that I'm alive
 function heartbeat() {
-	wait(0.01);
+	wait(0.001);
 }
 
 function spawnInitialUnits() {
@@ -284,6 +329,7 @@ function generateDrakkarUnits(): Array<UnitKind> {
 	for (i in 0...axeNum) { res.push(Unit.AxeWielder); }
 	for (i in 0...(armySize - axeNum)) { res.push(Unit.Warrior); }
 	for (i in 0...civilNum) { res.push(Unit.Villager); }
+	heartbeat();
 	return res;
 }
 
@@ -307,6 +353,8 @@ function updateFog() {
 		}
 	}
 
+	heartbeat();
+
 	//discover new zones, opened by watch towers
 	towerZones = [];
 	for (zone in player.zones) {
@@ -328,6 +376,8 @@ function updateFog() {
 		}
 	}
 
+	heartbeat();
+
 	//hide zones that are no longer discovered by watch towers or scout timeout
 	var needHide = false;
 	for (zone in prevTowerZones) {
@@ -343,6 +393,8 @@ function updateFog() {
 			else { needHide = true; }
 		}
 	}
+
+	heartbeat();
 
 	var tmpScoutZones:Array<Int> = [];
 	var tmpScoutZonesTime:Array<Float> = [];
@@ -360,6 +412,7 @@ function updateFog() {
 	}
 	scoutZones = tmpScoutZones.copy();
 	scoutZonesTime = tmpScoutZonesTime.copy();
+	heartbeat();
 	//FIXME: don't use coverAll(), if API will allow
 	if (needHide) {
 		player.coverAll();
@@ -370,6 +423,7 @@ function updateFog() {
 			player.discoverZone(getZone(zoneId));
 		}
 	}
+	heartbeat();
 	//FIX: always show colonized zones
 	for (zone in player.zones) {
 		if (!player.hasDiscovered(zone)) { player.discoverZone(zone); }
@@ -405,8 +459,14 @@ function updateSpecters() {
 		}
 		else break;
 	}
+
+	heartbeat();
+
 	for (specter in rmNewbornSpecters) { newbornSpecters.remove(specter); }
 	for (stime in rmSpecterSpawnTime) { specterSpawnTime.remove(stime); }
+
+	heartbeat();
+
 	if (prevUnits.length > player.units.length) {
 		for (i in 0...prevUnits.length) {
 			if (prevUnits[i].zone == null) { //found dead unit, spawn specter
@@ -434,12 +494,13 @@ function getValkyrieThorZone(valkyrie:Unit) {
 	return getZone(thorZones[i]);
 }
 
-function valkyrieAttack(unit:Unit) {
+function valkyrieAttack(unit:Unit, zone:Zone) {
 	for (s in specters) {
-		s.moveToZone(unit.zone, true, null); //specters attack anyone in zone, valkyrie attacks only warband
+		s.moveToZone(zone, true, null); //specters attack anyone in zone, valkyrie attacks only warband
 	}
 	var valkyrie = getActiveValkyrie();
-	valkyrie.moveToZone(unit.zone, true, null, unit);
+	valkyrie.moveToZone(zone, true, null, unit);
+	heartbeat();
 }
 
 function getUnitHealthPercents(unit: Unit) {
@@ -454,6 +515,7 @@ function regenerate(units: Array<Unit>, zones: Array<Int>) {
 			if (u.hitLife < 0) { u.hitLife = 0; }
 		}
 	}
+	heartbeat();
 }
 
 function getUnitWithLessHealth(units: Array<Unit>) {
@@ -465,12 +527,12 @@ function getUnitWithLessHealth(units: Array<Unit>) {
 			res = unit;
 		}
 	}
+	heartbeat();
 	return res;
 }
 
 function findPathNoCarvedStones(fromZone:Zone, toZone:Zone): Zone {
 	if (fromZone.id == toZone.id) { return fromZone; }
-	trace("~~~~ from " + fromZone.id + " to " + toZone.id);
 	var handledZones:Array<Int> = [fromZone.id];
 	var searchQueue:Array<Int> = [fromZone.id];
 	var parents:Array<Array<Int>> = [];
@@ -489,37 +551,31 @@ function findPathNoCarvedStones(fromZone:Zone, toZone:Zone): Zone {
 					}
 				}
 				if (!blocked) {
+					searchQueue.insert(0, n);
+					parents.push([n, curZoneId]);
+
 					if (n == toZone.id) { // found path!
 						heartbeat();
-						var curParent = curZoneId;
-						trace(curParent);
+						var curParent = n;
 						var i = 0;
 						while (i < parents.length) {
 							if (parents[i][0] == curParent) {
 								if (parents[i][1] == fromZone.id) {
-									trace(parents);
 									heartbeat();
 									return getZone(curParent);
 								}
 								curParent = parents[i][1];
-								trace(curParent);
 								i = 0;
 								continue;
 							}
 							i++;
 						}
 					}
-					else {
-						searchQueue.insert(0, n);
-						parents.push([n, curZoneId]);
-					}
 				}
 			}
 			heartbeat();
 		}
 	}
-	trace("NO PATH");
-	trace(parents);
 	return null;
 }
 
@@ -532,13 +588,13 @@ function updateValkyries() {
 	//valkyrie AI
 	var valkyrie = getActiveValkyrie();
 	if (valkyrie != null) {
-		findPathNoCarvedStones(player.units[0].zone, valkyrie.zone);
 		var armySize = player.getMilitaryCount();
 		if (armySize < aggroArmySize || getUnitHealthPercents(valkyrie) < valkyrieRetreatHp) { //move back to Thore
 			var baseZone = getValkyrieThorZone(valkyrie);
 			if (valkyrie.zone != baseZone) {
 				valkyrie.moveToZone(baseZone, false);
 			}
+			heartbeat();
 			for (s in specters) {
 				s.moveToZone(baseZone, false);
 			}
@@ -549,8 +605,10 @@ function updateValkyries() {
 				unit = getUnitWithLessHealth(player.units);
 			}
 			if (unit != null) {
-				//findPath(valkyrie.zone, unit.zone);
-				valkyrieAttack(unit);
+				var path = findPathNoCarvedStones(valkyrie.zone, unit.zone);
+				if (path != null) {
+					valkyrieAttack(unit, path);
+				}
 			}
 		}
 	}
@@ -592,13 +650,11 @@ function updateShips() {
 	heartbeat();
 }
 
-function updateWyvern() {
-	if (wyvern.zone == null || getActiveValkyrie() != null) { return; } //activate only when valkyries are dead
+function updateBoss() {
+	if (boss.zone == null || getActiveValkyrie() != null) { return; } //activate only when valkyries are dead
 	if (player.units.length > 0) {
-		if (wyvern.zone.units.length <= 1) { //self
-			var unit = getUnitWithLessHealth(player.units);
-			wyvern.moveToZone(unit.zone, true, null, unit);
-		}
+		var unit = player.units[0];
+		boss.moveToZone(unit.zone, true);
 	}
 	heartbeat();
 }
@@ -607,7 +663,7 @@ function updateWyvern() {
 function regularUpdate(dt : Float) {
 	updateFog();
 	updateValkyries();
-	updateWyvern();
+	updateBoss();
 	updateShips();
 	updateObjectives();
 }
