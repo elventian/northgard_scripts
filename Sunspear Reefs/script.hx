@@ -1,21 +1,25 @@
-// --- Saved variables ---
-// You can add what you want to the save
-savedInt 		= 0; // Here is the initialization for the first launch, after that the value will depend on what has been saved
-var prevDiscoveredZones:Array<Int> = [];
-var towerZones:Array<Int> = [];
-var prevTowerZones:Array<Int> = [];
-var scoutZones:Array<Int> = [];
-var scoutZonesTime:Array<Float> = [];
-var prevUnitZones:Array<Int> = [];
-var valkyrieZones:Array<Int> = [];
-var specterZones:Array<Int> = [];
 var valkyries:Array<Unit> = [];
 var specters:Array<Unit> = [];
-var shipArriveTime:Float = 0;
-var curShipDelta:Float = 0;
-var bossZone = 88;
 var boss:Unit;
-var needProtectionTime:Float = 0;
+// --- Saved variables ---
+// You can add what you want to the save
+// Here is the initialization for the first launch, after that the value will depend on what has been saved
+prevDiscoveredZones = [];
+towerZones = [];
+prevTowerZones = [];
+scoutZones = [];
+scoutZonesTime = [];
+prevUnitZones = [];
+valkyrieZones = [];
+specterZones = [];
+shipArriveTime = 0.0;
+curShipDelta = 0.0;
+bossZone = 88;
+needProtectionTime = 0.0;
+watchtowerDialog = false;
+activeObjectives = [];
+doneObjectives = [];
+allObjectives = [];
 
 function saveState() {
 	valkyrieZones = [];
@@ -32,7 +36,6 @@ function saveState() {
 		bossZone = boss.zone.id;
 	}
 	state.scriptProps = {
-		savedInt 		: savedInt,
 		prevDiscoveredZones: prevDiscoveredZones,
 		towerZones: towerZones,
 		prevTowerZones: prevTowerZones,
@@ -43,14 +46,19 @@ function saveState() {
 		specterZones: specterZones,
 		shipArriveTime: shipArriveTime,
 		curShipDelta: curShipDelta,
-		bossZone: bossZone
+		bossZone: bossZone,
+		needProtectionTime: needProtectionTime,
+		watchtowerDialog: watchtowerDialog,
+		activeObjectives: activeObjectives,
+		doneObjectives: doneObjectives,
+		allObjectives: allObjectives
 	};
 }
 
 // --- Settings ---
 var drakkarSpawnZone = 137;
 var scoutDiscoverTimeout = 180; //time, after which zone will be hidden
-var aggroArmySize = 5; //player army size, from which Valkyrie will attack
+var aggroArmySize = 4; //player army size, from which Valkyrie will attack
 var valkyrieRetreatHp = 40;
 var valkyrieAttackHp = 90;
 var shipSpawnDelay = 480; //sec
@@ -117,43 +125,76 @@ function getNeighbours(zoneId: Int) : Array<Int> {
 
 // --- Script code ---
 function init() {
-	if (state.time == 0)
+	if (state.time == 0) {
 		onFirstLaunch();
+	}
+	else {
+		recoverObjectives(); //FIXME: remove when it will be fixed in game
+	}
 	onEachLaunch();
+}
+
+function hideAllObjectives() {
+	for (obj in allObjectives) {
+		state.objectives.setVisible(obj, false);
+	}
+}
+
+function pushObjective(title: String, text: String) {
+	state.objectives.add(title, text);
+	allObjectives.push(title);
 }
 
 function createObjectives() {
 	state.objectives.title = "Settle on island and find its secrets"; //FIXME: why not displayed?
 	state.objectives.summary = "Settle on island and find its secrets";
 
-	state.objectives.add("Watchtower", "We sailed to Sunspear Reefs to build new home. And finally we're here, on this beautiful untouched island! Let's look around. Build a Defense Tower");
-	state.objectives.add("Lighthouse", "Build a lighthouse to help our ships find their way here");
-	state.objectives.add("LostShip", "When we reached the island from south, our second ship went astray. Send expedition to find where she moored");
-	state.objectives.add("Specters", "What was that?! One of our people just died and turned into a ghost! We need to investigate this. Follow him");
-	state.objectives.add("Protection", "We cannot gather big enough army to kill all specters... Need to find a way to stop their raids");
-	state.objectives.add("Stones", "Someone built those Carved Stones as a protection from specters. We should try it too");
-	state.objectives.add("Guards", "Looks like they defend something. Island from strangers? Looks like they won't let us settle, we have to end them");
-	state.objectives.add("Boss", "Valkyries guarded ancient evil creature... and we let it free. Kill or be killed!");
-	state.objectives.setVisible("Lighthouse", false);
-	state.objectives.setVisible("LostShip", false);
-	state.objectives.setVisible("Specters", false);
-	state.objectives.setVisible("Protection", false);
-	state.objectives.setVisible("Stones", false);
-	state.objectives.setVisible("Guards", false);
-	state.objectives.setVisible("Boss", false);
+	pushObjective("Watchtower", "Build a Defense Tower");
+	pushObjective("Lighthouse", "Build a Lighthouse");
+	pushObjective("LostShip", "Find our second ship somewhere in the south");
+	pushObjective("Specters", "Find a place where headed the specter");
+	pushObjective("Protection", "Scout island to find a way to stop raids");
+	pushObjective("Stones", "Block the way of specters with Carved Stones");
+	pushObjective("Guards", "Kill all valkyries");
+	pushObjective("Boss", "Defeat Ice golem");
+
+	hideAllObjectives();
+	showObjective("Watchtower");
 }
 
-function objectiveDone(name: String) {
-	state.objectives.setStatus(name, OStatus.Done);
-	hideObjetives.push(name);
-	hideObjetivesTime.push(state.time);
+function recoverObjectives() {
+	hideAllObjectives();
 
+	for (obj in allObjectives) {
+		state.objectives.setStatus(obj, OStatus.Empty);
+	}
+
+	for (obj in doneObjectives) {
+		state.objectives.setStatus(obj, OStatus.Done);
+	}
+
+	for (obj in activeObjectives) {
+		state.objectives.setVisible(obj, true);
+	}
 }
 
 function moveCameraDiscovered(zone: Zone) {
 	if (player.hasDiscovered(zone)) {
 		moveCamera(zone);
 	}
+}
+
+function objectiveDone(name: String) {
+	state.objectives.setStatus(name, OStatus.Done);
+	hideObjetives.push(name);
+	hideObjetivesTime.push(state.time);
+	activeObjectives.remove(name);
+	doneObjectives.push(name);
+}
+
+function showObjective(name: String) {
+	state.objectives.setVisible(name, true);
+	activeObjectives.push(name);
 }
 
 function updateObjectives() {
@@ -167,10 +208,15 @@ function updateObjectives() {
 	heartbeat();
 
 	if (state.objectives.getStatus("Watchtower") == OStatus.Empty) {
+		if (!watchtowerDialog) {
+			watchtowerDialog = true;
+			talk("We sailed to Sunspear Reefs to build new home, and finally we're here, on this beautiful untouched island! Let's look around. If we build a Defense Tower, we could see far into wild lands.");
+		}
 		if (player.hasBuilding(Building.WatchTower, false)) {
 			objectiveDone("Watchtower");
-			state.objectives.setVisible("Lighthouse", true);
-			state.objectives.setVisible("LostShip", true);
+			showObjective("Lighthouse");
+			showObjective("LostShip");
+			talk("When we almost reached the island, our second ship went astray. We should send expedition to find where she moored. And we need to build a Lighthouse, so other ships of our clan could navigate here.");
 		}
 	}
 
@@ -200,8 +246,9 @@ function updateObjectives() {
 
 	if (state.objectives.getStatus("Specters") == OStatus.Empty) {
 		if (!state.objectives.isVisible("Specters") && newbornSpecters.length > 0) {
-			state.objectives.setVisible("Specters", true);
+			showObjective("Specters");
 			moveCameraDiscovered(newbornSpecters[0].zone);
+			talk("What was that?! One of our people just died and turned into a ghost! We need to investigate this. Follow him!");
 		}
 		for (zoneId in thorZones) {
 			heartbeat();
@@ -212,7 +259,8 @@ function updateObjectives() {
 					if (unit.kind == Unit.SpecterWarrior) {
 						moveCameraDiscovered(zone);
 						objectiveDone("Specters");
-						state.objectives.setVisible("Guards", true);
+						showObjective("Guards");
+						talk("Looks like valkyries and specters defend something. Island from strangers? They won't let us settle, we have to end them.");
 						done = true;
 						for (zone in valkyrieZones) {
 							player.discoverZone(getZone(zone));
@@ -225,9 +273,10 @@ function updateObjectives() {
 		}
 	}
 	else if (state.objectives.getStatus("Protection") == OStatus.Empty) {
-		if (specters.length > 10 && !state.objectives.isVisible("Protection")) {
-			state.objectives.setVisible("Protection", true);
+		if (specters.length >= 10 && !state.objectives.isVisible("Protection")) {
+			showObjective("Protection");
 			needProtectionTime = state.time;
+			talk("We cannot gather big enough army to kill all specters... Need to find a way to stop their raids. Maybe the answer somewhere on the island?");
 		}
 		else if (state.objectives.isVisible("Protection") &&
 		needProtectionTime + showProtectionTimeout < state.time) {
@@ -236,7 +285,8 @@ function updateObjectives() {
 				player.discoverZone(getZone(zone));
 			}
 			moveCamera(getZone(carvedStones[2]));
-			state.objectives.setVisible("Stones", true);
+			showObjective("Stones");
+			talk("Someone built those Carved Stones as a protection from specters. Maybe we should try it too.");
 		}
 		heartbeat();
 	}
@@ -251,7 +301,8 @@ function updateObjectives() {
 
 	if (state.objectives.getStatus("Guards") == OStatus.Empty && getActiveValkyrie() == null) {
 		objectiveDone("Guards");
-		state.objectives.setVisible("Boss", true);
+		showObjective("Boss");
+		talk("Valkyries guarded ancient evil creature... and we let it free. Kill or be killed!");
 	}
 
 	heartbeat();
@@ -274,7 +325,7 @@ function onFirstLaunch() {
 	state.removeVictory(VictoryKind.VFame);
 	state.removeVictory(VictoryKind.VLore);
 	state.removeVictory(VictoryKind.VMoney);
-	addRule(Rule.VillagerStrike);
+
 	player.addResource(Resource.Food, 160);
 	player.setTech([Tech.Drakkars]);
 	spawnInitialUnits();
@@ -306,6 +357,8 @@ function onEachLaunch() {
 			break;
 		}
 	}
+
+	addRule(Rule.VillagerStrike);
 }
 
 //FIX: if regularUpdate runs for too long, the game will exit
@@ -531,7 +584,7 @@ function getUnitWithLessHealth(units: Array<Unit>) {
 	return res;
 }
 
-function findPathNoCarvedStones(fromZone:Zone, toZone:Zone): Zone {
+function findPath(fromZone:Zone, toZone:Zone, noCarvedStones:Bool): Zone {
 	if (fromZone.id == toZone.id) { return fromZone; }
 	var handledZones:Array<Int> = [fromZone.id];
 	var searchQueue:Array<Int> = [fromZone.id];
@@ -544,10 +597,12 @@ function findPathNoCarvedStones(fromZone:Zone, toZone:Zone): Zone {
 				handledZones.push(n);
 				var nZone = getZone(n);
 				var blocked = false;
-				for (b in nZone.buildings) {
-					if (b.kind == Building.CarvedStone) {
-						blocked = true;
-						break;
+				if (noCarvedStones) {
+					for (b in nZone.buildings) {
+						if (b.kind == Building.CarvedStone) {
+							blocked = true;
+							break;
+						}
 					}
 				}
 				if (!blocked) {
@@ -604,8 +659,8 @@ function updateValkyries() {
 			if (unit == null) {
 				unit = getUnitWithLessHealth(player.units);
 			}
-			if (unit != null) {
-				var path = findPathNoCarvedStones(valkyrie.zone, unit.zone);
+			if (unit != null && unit.zone != null) {
+				var path = findPath(valkyrie.zone, unit.zone, true);
 				if (path != null) {
 					valkyrieAttack(unit, path);
 				}
@@ -653,8 +708,24 @@ function updateShips() {
 function updateBoss() {
 	if (boss.zone == null || getActiveValkyrie() != null) { return; } //activate only when valkyries are dead
 	if (player.units.length > 0) {
+		for (unit in player.units) {
+			if (unit.kind != Unit.Sailor && boss.zone.units.indexOf(unit) != -1) {
+				boss.moveToZone(boss.zone, true);
+				heartbeat();
+				return;
+			}
+		}
 		var unit = player.units[0];
-		boss.moveToZone(unit.zone, true);
+		for (nextUnit in player.units) {
+			if (nextUnit.kind != Unit.Sailor) {
+				unit = nextUnit;
+				break;
+			}
+		}
+		if (unit.zone != null) {
+			var nextZone = findPath(boss.zone, unit.zone, false);
+			boss.moveToZone(nextZone, true);
+		}
 	}
 	heartbeat();
 }
